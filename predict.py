@@ -34,23 +34,29 @@ arg.add_argument('--category_name',dest='category_name',default='cat_to_name.jso
 pa=arg.parse_args()
 
 image_path= pa.data_dir + '/test' + '/10/' + 'image_07090.jpg'
+device = torch.device("cuda" if pa.gpu=='gpu' else "cpu")
 
 
 # print(image_path)
 
 def main():
-
+    '''
+    Argument: no explicitly lised input, but effctively from the parse arguments (e.g pa.load_dir)
+    Return: predict the name of the flowers and the associated probailities
+    
+    This function
+    1)loads the saved model and the category json for category mapping
+    2)run the predict function from util.py,and display the print out
+    
+    '''
     model=util.load_checkpoint(pa.load_dir)
 
 
     with open(pa.category_name, 'r') as f:
         cat_to_name = json.load(f)
     
-#     print(cat_to_name.get)
-    
-#     print(len(cat_to_name))
-    
-    top_p_list, top_flowers = util.predict(image_path, pa.load_dir, cat_to_name, pa.top_k)
+
+    top_p_list, top_flowers = util.predict(image_path, pa.load_dir, cat_to_name, pa.top_k, device)
 #     labels = [cat_to_name[str(index+1)] for index in np.naray(top_p_list[1][0])
             
 #     return print(top_p_list[0])       
