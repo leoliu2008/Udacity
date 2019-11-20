@@ -35,16 +35,29 @@ arg.add_argument('--output_units',dest='output_units',action='store',default=102
 pa=arg.parse_args()
 
 
-
+device = torch.device("cuda" if pa.gpu=='gpu' else "cpu")
 
 
 
 def main():
+    '''
+    Argument: no explicitly lised input, but effctively from the parse arguments (e.g pa.load_dir)
+    Return: save the model to pth file
+    
+    This functions
+    1)loads data from transform_load_image functions from util.py
+    2)reconstruct the features of the model using construct_nnwork
+    2)undo the previous tranformation from process_image function (e.g "de"-normalisation)
+    '''
+    
+
     trainloaders, validloaders, testloaders, train_data = util.transform_load_image(pa.data_dir)
-    model, criterion, optimizer = util.construct_newwork(pa.model_type, pa.drop_out, pa.hidden_layer_1, pa.hidden_layer_2, pa.output_units, pa.learning_rate)
+    device = torch.device("cuda" if pa.gpu=='gpu' else "cpu")
+
+    model, criterion, optimizer = util.construct_network(device, pa.model_type, pa.drop_out, pa.hidden_layer_1, pa.hidden_layer_2, pa.output_units, pa.learning_rate)
 
     with active_session():
-        util.test_network(model, criterion, optimizer,trainloaders, validloaders, pa.epochs, print_every=40, steps=0)
+        util.test_network(model, criterion, optimizer,trainloaders, validloaders, device, pa.epochs, print_every=40, steps=0)
         util.save_checkpoint(model, train_data, optimizer, pa.save_dir, pa.epochs)
 
     print('Training completed')
