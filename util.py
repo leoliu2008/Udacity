@@ -13,10 +13,24 @@ import numpy as np
 
 from PIL import Image
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from collections import OrderedDict
+
+##two models with different input dimensions
+arch={'vgg16':25088, 'densenet121': 1024}
 
 
 def transform_load_image(data_dir):
+    '''
+    Argument: the directory of the data file
+    return the data loaders for train/test/validation, plus the train data
+    
+    This function 
+    1) locates the image files
+    2) applies the transformations such as rotations, resize, flips and normalizations
+    3)converts the images to tensor 
+    4)the output also includes train_data, whose class_to_idx would be needed to save the checkpoint (ses 'save_checkpoint' funciton)
+    
+    '''
 
     train_dir = data_dir + '/train'
     valid_dir = data_dir + '/valid'
@@ -57,10 +71,23 @@ def transform_load_image(data_dir):
     testloaders = DataLoader(test_data, batch_size=64, shuffle = True)
     return trainloaders, validloaders, testloaders,train_data
 
-arch={'vgg16':25088, 'densenet121': 1024}
 
-def construct_newwork(model_type='densenet121', drop_out=0.15, hidden_layer_1=512, hidden_layer_2=256, output_units = 102, learning_rate=0.005):
-    arch={'vgg16':25088, 'densenet121': 1024}
+def construct_network(device, model_type='densenet121', drop_out=0.15, hidden_layer_1=512, hidden_layer_2=256, output_units = 102, learning_rate=0.005):
+    '''
+    Argument: 
+    1)model type to be trained (densenet121 vs vgg16) and its associated input layer dimension. 
+    2)dimension of hidden layers and output units
+    3)other parameters such as drop_out and learning rate
+    
+    Return: model, loss function criterion, and optmizer, ready to use for model training
+    
+    This function
+    1)rebuild the model classifier with the customised inputs from the model arugments
+    2)use NLLLosss (negative log likelihood loss) to define the loss function
+    3)use adam to optimize the parameter (e.g. update the weights during backpropagation), with predefined learning rate
+    
+    '''
+    
 
     if model_type=='vgg16':
         model = models.vgg16(pretrained=True)
@@ -75,10 +102,10 @@ def construct_newwork(model_type='densenet121', drop_out=0.15, hidden_layer_1=51
     for param in model.parameters():
         param.requires_grad = False
 
-    # reconstruct the classifer 
-    from collections import OrderedDict
+
 
     input_units = arch[model_type]
+    
     classifier = nn.Sequential(OrderedDict([ 
                                 ('fc1',nn.Linear(input_units, hidden_layer_1)), 
                                 ('relu1', nn.ReLU()),
@@ -96,17 +123,32 @@ def construct_newwork(model_type='densenet121', drop_out=0.15, hidden_layer_1=51
     #only trian the classifier parameters, feature parameters are frozen
     optimizer = optim.Adam(model.classifier.parameters(),lr=learning_rate)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device);
+   
+    model.to(device)
     
     return model, criterion, optimizer
 
 
-def test_network(model, criterion, optimizer, train_data, valid_data, epochs, print_every=40, steps=0):
-    model, criterion , optimizer= construct_newwork()
+def test_network(model, criterion, optimizer, train_data, valid_data, device, epochs, print_every=40, steps=0):
+    '''
+    Argument: 
+    1)model, criterion and optimizer from the 'construct_network' function
+    2)train_data and valid_data from the 'transform_load_image' function
+    3)other parameters such as epochs etc
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to (device)
+    Return: print out the training loss, validation loss, and most importantly the accuracy of the model (with target 75% or above)
+    
+    This function
+    1)use epochs for multiple rounds of model training,. ithin each epoch, it would kick off the model forward,  backpropagation and optmization of weights
+    2)during model validaiton (with gradient turned off), it would turn the result of model output from log(probability) to probability
+    3)it will use the class with highest probability as the prediction, and compare it to the label to calculate the accuracy
+    
+    
+    '''
+    
+    model, criterion, optimizer = construct_network(device)
+    
+    model.to(device)
 
 
     for e in range (epochs): 
@@ -162,11 +204,10 @@ def test_network(model, criterion, optimizer, train_data, valid_data, epochs, pr
                 print("Epoch: {}/{}.. ".format(e+1, epochs),
                       "Training Loss: {:.3f}.. ".format(running_loss/print_every),
                       "Valid Loss: {:.3f}.. ".format(valid_loss/len(valid_data)),
-                      "Valid Accuracy: {:.3f}%.. ".format(accuracy/len(valid_data)*100),
-                       "Valid Accuracy - absolute value: {:.3f}.. ".format(accuracy),
-                       "ValidLoaders Length - absolute value: {:.3f}".format(len(valid_data))
+                      "Valid Accuracy: {:.3f}%.. ".format(accuracy/len(valid_data)*100))
+                
 
-                     )
+                     
 
                 running_loss = 0
 
@@ -194,6 +235,15 @@ def test_network(model, criterion, optimizer, train_data, valid_data, epochs, pr
                 
                 
 def save_checkpoint(model, train_data, optimizer, model_pth_file, epochs):
+    '''
+    Argument: model & opitimizer,  train_data from the transform_load_image funciton, and the name of pth that we could like to serialize the modle
+    Return: model to be saved to the pth file
+    
+    This function 
+    1) uses train_data class_to_idx for the model 
+    2) saves other featurs such as model_state_dict, classifier, optmizer_state_dict, epochs
+
+    '''
     model.class_to_idx = train_data.class_to_idx
     model.to('cpu')
     checkpoint = {'model_state_dict': model.state_dict(),
@@ -205,17 +255,18 @@ def save_checkpoint(model, train_data, optimizer, model_pth_file, epochs):
     torch.save(checkpoint, model_pth_file)
     
 def load_checkpoint(model_pth_file,model_type='densenet121'):
-    """
-    Loads deep learning model checkpoint.
-    """
+    '''
+    Argument: the name of the saved pth file, the modle type (e.g denssenet121 vs vgg16)
+    Return: the fully loaded model with all parameters set up properly
+    
+    This function loads deep learning model checkpoint.
+    
+    '''
     
     # Load the saved file
     checkpoint = torch.load(model_pth_file)
     
     # Download pretrained model
-    
-    arch={'vgg16':25088, 'densenet121': 1024}
-
     if model_type=='vgg16':
         model =models.vgg16(pretrained=True)
     elif model_type=='densenet121':
@@ -235,8 +286,15 @@ def load_checkpoint(model_pth_file,model_type='densenet121'):
     return model
 
 def process_image(image_path):
-    ''' Scales, crops, and normalizes a PIL image for a PyTorch model,
-        returns an Numpy array
+    ''' 
+    Argument: the path of the image
+    
+    Return: the data of the image in the ndarray format
+    
+    the functions
+    1)resizes, crops, and normalizes a PIL image
+    2)converts the data from tensor to ndarray, ready for use in the imshow() funciton.
+    
     '''
     image_pil=Image.open(image_path)
     transform=transforms.Compose([transforms.Resize(256),
@@ -252,7 +310,14 @@ def process_image(image_path):
     # TODO: Process a PIL image for use in a PyTorch model
     
 def imshow(image, ax=None, title=None):
-    """Imshow for Tensor."""
+    '''
+    Argument; the image data in the ndarra format
+    Return: display the image
+    
+    This functions
+    1)transposes the image data(e.g move the color Channel RGB from 1st dimension to the 3rd dimension)
+    2)undo the previous tranformation from process_image function (e.g "de"-normalisation)
+    '''
     import numpy as np
     if ax is None:
         fig, ax = plt.subplots()
@@ -273,9 +338,20 @@ def imshow(image, ax=None, title=None):
     
     return ax
 
-def predict(image_path, model_pth_file, cat_to_name, top_k):
+def predict(image_path, model_pth_file, cat_to_name, top_k, device):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
     '''
+    '''
+    Argument; the locaiton of the image to be tested, the pth file for the saved model, the mapping on the category names and its indices, top K prediction
+    Return: the top k prediced categoryes and its probability
+    
+    This functions
+    1)loads the saved model from the pth file
+    2)processes the image data and convert from ndarry to tensor, ready for model to train
+    3)model to predict the top x classes and their probabilities (top_class, and top_p)
+    4)map the index to get the category name (e.g the names of the flowers)
+    '''
+    
     model=load_checkpoint(model_pth_file)
     model.to(device)
     image_ndarray=process_image(image_path)
@@ -305,5 +381,3 @@ def predict(image_path, model_pth_file, cat_to_name, top_k):
         top_flowers=list(map(cat_to_name.get, top_labels))
 
     return top_p_list, top_flowers
-#     probability.topk(topk)
-    # TODO: Implement the code to predict the class from an image file
